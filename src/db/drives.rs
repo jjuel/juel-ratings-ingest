@@ -1,0 +1,35 @@
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+
+#[derive(Debug, FromRow, Serialize, Deserialize)]
+pub struct Drive {
+    pub id: i32,
+    pub cfbd_id: String,
+    pub game_id: i32,
+    pub offense_team_id: i32,
+    pub defense_team_id: i32,
+    pub offense_conference: Option<String>,
+    pub defense_conference: Option<String>,
+    pub drive_number: i32,
+    pub scoring: Option<bool>,
+    pub start_period: Option<i32>,
+    pub start_yardline: Option<i32>,
+    pub start_yards_to_goal: Option<i32>,
+    pub start_time_minutes: Option<i32>,
+    pub start_time_seconds: Option<i32>,
+    pub end_period: Option<i32>,
+    pub end_yardline: Option<i32>,
+    pub end_yards_to_goal: Option<i32>,
+    pub end_time_minutes: Option<i32>,
+    pub end_time_seconds: Option<i32>,
+    pub elapsed_minutes: Option<i32>,
+    pub elapsed_seconds: Option<i32>,
+    pub plays: Option<i32>,
+    pub yards: Option<i32>,
+    pub drive_result: Option<String>,
+    pub is_home_offense: Option<bool>,
+    pub start_offense_score: Option<i32>,
+    pub start_defense_score: Option<i32>,
+    pub end_offense_score: Option<i32>,
+    pub end_defense_score: Option<i32>,
+}
