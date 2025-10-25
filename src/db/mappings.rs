@@ -1,5 +1,6 @@
 use crate::cfbd;
 use crate::db;
+use chrono::{DateTime, Utc};
 use serde_json::to_value;
 use std::collections::HashMap;
 
@@ -30,6 +31,27 @@ impl From<cfbd::Team> for db::Team {
             grass: api.location.as_ref().and_then(|l| l.grass),
             dome: api.location.as_ref().and_then(|l| l.dome),
             alternate_names: api.alternate_names,
+        }
+    }
+}
+
+impl From<cfbd::Game> for db::Game {
+    fn from(api: cfbd::Game) -> Self {
+        let start_date = api.start_date
+            .parse::<DateTime<Utc>>()
+            .expect("Failed to parse start_date");
+
+        Self {
+            id: 0,
+            cfbd_id: api.id,
+            season: api.season,
+            week: api.week,
+            season_type: api.season_type,
+            start_date,
+            home_team: api.home_team,
+            home_points: api.home_points,
+            away_team: api.away_team,
+            away_points: api.away_points,
         }
     }
 }
