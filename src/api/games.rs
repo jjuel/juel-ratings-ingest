@@ -3,10 +3,14 @@ use crate::api::client::{create_client, get_api_key};
 use reqwest::Error;
 use serde::{Deserialize, Serialize};
 
-pub async fn fetch(year: u32, week: u32) -> Result<Vec<Game>, Error> {
-    let url = format!("{}games?year={}&week={}", CFBD_BASE_URL, year, week);
+pub async fn fetch(year: i32, week: Option<i32>) -> Result<Vec<Game>, Error> {
     let token = get_api_key();
     let client = create_client();
+
+    let mut url = format!("{}games?year={}", CFBD_BASE_URL, year);
+    if let Some(w) = week {
+        url.push_str(&format!("&week={}", w));
+    }
 
     let response = client
         .get(&url)

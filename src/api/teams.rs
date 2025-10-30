@@ -3,7 +3,7 @@ use crate::api::client::{create_client, get_api_key};
 use reqwest::Error;
 use serde::{Deserialize, Serialize};
 
-pub async fn fetch(year: u32) -> Result<Vec<Team>, Error> {
+pub async fn fetch(year: i32) -> Result<Vec<Team>, Error> {
     let url = format!("{}teams?year={}", CFBD_BASE_URL, year);
     let token = get_api_key();
     let client = create_client();
