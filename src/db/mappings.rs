@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::api::drives::{Drive as ApiDrive, DriveClock};
 use crate::api::game_advanced_stats::GameAdvancedStats as ApiGameAdvancedStats;
 use crate::api::games::Game as ApiGame;
+use crate::api::plays::Play as ApiPlay;
 use crate::api::teams::Team as ApiTeam;
 
 pub fn map_team(api: &ApiTeam) -> db::Team {
@@ -185,5 +186,63 @@ pub fn map_game_advanced_stats(
         defense_plays: defense.plays,
 
         raw: Some(to_value(api).unwrap_or_default()),
+    })
+}
+
+pub fn map_play(
+    api: &ApiPlay,
+    game_id: i32,
+    teams_by_name: &HashMap<String, i32>,
+    drives_by_cfbd_id: &HashMap<String, i32>,
+) -> Option<db::Play> {
+    // Both offense and defense team names are required
+    let offense_team_id = api.offense.as_ref().and_then(|name| teams_by_name.get(name))?;
+    let defense_team_id = api.defense.as_ref().and_then(|name| teams_by_name.get(name))?;
+
+    // Split clock into minutes and seconds
+    let (clock_minutes, clock_seconds) = match &api.clock {
+        Some(clock) => (Some(clock.minutes), Some(clock.seconds)),
+        None => (None, None),
+    };
+
+    // Look up drive_id by cfbd_drive_id if available
+    let drive_id = api.drive_id.as_ref().and_then(|cfbd_drive_id| drives_by_cfbd_id.get(cfbd_drive_id)).copied();
+
+    // Require cfbd_id
+    let cfbd_id = api.id.as_ref()?.clone();
+
+    Some(db::Play {
+        id: 0,
+        cfbd_id,
+        cfbd_drive_id: api.drive_id.clone(),
+        drive_id,
+        game_id,
+        drive_number: api.drive_number,
+        play_number: api.play_number,
+        offense: api.offense.clone(),
+        offense_team_id: *offense_team_id,
+        offense_conference: api.offense_conference.clone(),
+        offense_score: api.offense_score,
+        defense: api.defense.clone(),
+        defense_team_id: *defense_team_id,
+        defense_conference: api.defense_conference.clone(),
+        defense_score: api.defense_score,
+        home: api.home.clone(),
+        away: api.away.clone(),
+        period: api.period,
+        clock_minutes,
+        clock_seconds,
+        offense_timeouts: api.offense_timeouts,
+        defense_timeouts: api.defense_timeouts,
+        yardline: api.yardline,
+        yards_to_goal: api.yards_to_goal,
+        down: api.down,
+        distance: api.distance,
+        yards_gained: api.yards_gained,
+        scoring: api.scoring,
+        play_type: api.play_type.clone(),
+        play_text: api.play_text.clone(),
+        ppa: api.ppa,
+        wallclock: api.wallclock.clone(),
     })
 }

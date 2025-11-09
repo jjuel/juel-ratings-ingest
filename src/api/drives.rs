@@ -3,13 +3,17 @@ use crate::api::client::{create_client, get_api_key};
 use reqwest::Error;
 use serde::{Deserialize, Serialize};
 
-pub async fn fetch(year: i32, week: Option<i32>) -> Result<Vec<Drive>, Error> {
+pub async fn fetch(year: i32, week: Option<i32>, season_type: Option<String>) -> Result<Vec<Drive>, Error> {
     let token = get_api_key();
     let client = create_client();
 
     let mut url = format!("{}drives?year={}", CFBD_BASE_URL, year);
     if let Some(w) = week {
         url.push_str(&format!("&week={}", w));
+    }
+
+    if let Some(st) = season_type {
+        url.push_str(&format!("&seasonType={}", st));
     }
 
     let response = client

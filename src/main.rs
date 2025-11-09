@@ -1,10 +1,10 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use dotenv::dotenv;
 use sqlx::PgPool;
 
 use anyhow::{Context, Ok, Result};
 
-use crate::db::{games::build_game_map, pool, teams::build_team_name_map};
+use crate::db::{drives::build_drive_map, games::build_game_map, pool, teams::build_team_name_map};
 
 mod api;
 mod db;
@@ -23,6 +23,8 @@ enum Commands {
         year: u32,
         #[arg(short, long)]
         week: Option<u32>,
+        #[arg(short, long)]
+        season_type: Option<SeasonType>,
     },
     Teams {
         #[arg(short, long, default_value = "2025")]
@@ -33,19 +35,56 @@ enum Commands {
         year: u32,
         #[arg(short, long)]
         week: Option<u32>,
+        #[arg(short, long)]
+        season_type: Option<SeasonType>,
     },
     Drives {
         #[arg(short, long, default_value = "2025")]
         year: u32,
         #[arg(short, long)]
         week: Option<u32>,
+        #[arg(short, long)]
+        season_type: Option<SeasonType>,
+    },
+    Plays {
+        #[arg(short, long, default_value = "2025")]
+        year: u32,
+        #[arg(short, long, default_value = "1")]
+        week: u32,
+        #[arg(short, long)]
+        season_type: Option<SeasonType>,
     },
     AdvStats {
         #[arg(short, long, default_value = "2025")]
         year: u32,
         #[arg(short, long)]
         week: Option<u32>,
+        #[arg(short, long)]
+        season_type: Option<SeasonType>,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SeasonType {
+    Regular,
+    Postseason,
+    Both,
+    AllStar,
+    SpringRegular,
+    SpringPostseason,
+}
+
+impl SeasonType {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Regular => "regular",
+            Self::Postseason => "postseason",
+            Self::Both => "both",
+            Self::AllStar => "allstar",
+            Self::SpringRegular => "spring_regular",
+            Self::SpringPostseason => "spring_postseason",
+        }
+    }
 }
 
 #[tokio::main]
@@ -55,7 +94,7 @@ async fn main() -> Result<()> {
     let pool = pool::create_pool().await?;
 
     match &cli.command {
-        Commands::All { year, week } => {
+        Commands::All { year, week, season_type} => {
             let week = week.map(|w| w as i32);
 
             let scope = match week {
@@ -63,13 +102,21 @@ async fn main() -> Result<()> {
                 None => format!("year {}", year),
             };
 
+            let season_type = season_type.map(|st| st.as_str().to_string());
+
             println!("\n🏈 Starting full data ingestion for {}\n", scope);
             let start = std::time::Instant::now();
 
             ingest_teams(&pool, *year as i32).await?;
-            ingest_games(&pool, *year as i32, week).await?;
-            ingest_drives(&pool, *year as i32, week).await?;
-            ingest_game_advanced_stats(&pool, *year as i32, week).await?;
+            ingest_games(&pool, *year as i32, week, season_type.clone()).await?;
+            ingest_drives(&pool, *year as i32, week, season_type.clone()).await?;
+
+            // Plays require a week parameter
+            if let Some(w) = week {
+                ingest_plays(&pool, *year as i32, w, season_type.clone()).await?;
+            }
+
+            ingest_game_advanced_stats(&pool, *year as i32, week, season_type.clone()).await?;
 
             let duration = start.elapsed();
             println!("\n✨ All data ingested successfully in {:.2}s\n", duration.as_secs_f64());
@@ -77,17 +124,24 @@ async fn main() -> Result<()> {
         Commands::Teams { year } => {
             ingest_teams(&pool, *year as i32).await?;
         }
-        Commands::Games { year, week } => {
+        Commands::Games { year, week, season_type } => {
             let week = week.map(|w| w as i32);
-            ingest_games(&pool, *year as i32, week).await?;
+            let season_type = season_type.map(|st| st.as_str().to_string());
+            ingest_games(&pool, *year as i32, week, season_type).await?;
         }
-        Commands::Drives { year, week } => {
+        Commands::Drives { year, week, season_type } => {
             let week = week.map(|w| w as i32);
-            ingest_drives(&pool, *year as i32, week).await?;
+            let season_type = season_type.map(|st| st.as_str().to_string());
+            ingest_drives(&pool, *year as i32, week, season_type).await?;
         }
-        Commands::AdvStats { year, week } => {
+        Commands::Plays { year, week, season_type } => {
+            let season_type = season_type.map(|st| st.as_str().to_string());
+            ingest_plays(&pool, *year as i32, *week as i32, season_type).await?;
+        }
+        Commands::AdvStats { year, week, season_type } => {
             let week = week.map(|w| w as i32);
-            ingest_game_advanced_stats(&pool, *year as i32, week).await?;
+            let season_type = season_type.map(|st| st.as_str().to_string());
+            ingest_game_advanced_stats(&pool, *year as i32, week, season_type).await?;
         }
     }
 
@@ -109,13 +163,14 @@ async fn ingest_teams(pool: &PgPool, year: i32) -> Result<usize> {
     Ok(stats.ids.len())
 }
 
-async fn ingest_games(pool: &PgPool, year: i32, week: Option<i32>) -> Result<usize> {
+async fn ingest_games(pool: &PgPool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
     let scope = match week {
         Some(w) => format!("week {} of year {}", w, year),
         None => format!("year {}", year),
     };
 
-    let api_games = api::games::fetch(year, week)
+
+    let api_games = api::games::fetch(year, week, season_type)
         .await
         .context(format!("Failed to fetch games from CFBD API for {}\n", scope))?;
 
@@ -129,13 +184,13 @@ async fn ingest_games(pool: &PgPool, year: i32, week: Option<i32>) -> Result<usi
     Ok(stats.ids.len())
 }
 
-async fn ingest_drives(pool: &PgPool, year: i32, week: Option<i32>) -> Result<usize> {
+async fn ingest_drives(pool: &PgPool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
     let scope = match week {
         Some(w) => format!("week {} of year {}", w, year),
         None => format!("year {}", year),
     };
 
-    let api_drives = api::drives::fetch(year, week)
+    let api_drives = api::drives::fetch(year, week, season_type)
         .await
         .context(format!("Failed to fetch drives from CFBD API for {}", scope))?;
 
@@ -169,13 +224,54 @@ async fn ingest_drives(pool: &PgPool, year: i32, week: Option<i32>) -> Result<us
     Ok(stats.ids.len())
 }
 
-async fn ingest_game_advanced_stats(pool: &PgPool, year: i32, week: Option<i32>) -> Result<usize> {
+async fn ingest_plays(pool: &PgPool, year: i32, week: i32, season_type: Option<String>) -> Result<usize> {
+    let scope = format!("week {} of year {}", week, year);
+
+    let api_plays = api::plays::fetch(year, week, season_type)
+        .await
+        .context(format!("Failed to fetch plays from CFBD API for {}", scope))?;
+
+    let teams_by_name = build_team_name_map(pool)
+        .await
+        .context("Failed to build team name lookup map")?;
+
+    let games_by_cfbd_id = build_game_map(pool, year, Some(week))
+        .await
+        .context(format!("Failed to build game ID lookup map for {}", scope))?;
+
+    let drives_by_cfbd_id = build_drive_map(pool, year, Some(week))
+        .await
+        .context(format!("Failed to build drive ID lookup map for {}", scope))?;
+
+    let fetched_count = api_plays.len();
+    let db_plays: Vec<db::Play> = api_plays
+        .iter()
+        .filter_map(|play| {
+            let game_id = play.game_id.and_then(|gid| games_by_cfbd_id.get(&(gid as i64)))?;
+            db::mappings::map_play(play, *game_id, &teams_by_name, &drives_by_cfbd_id)
+        })
+        .collect();
+
+    let skipped_count = fetched_count - db_plays.len();
+
+    let stats = db::plays::upsert_batch(pool, &db_plays)
+        .await
+        .context(format!("Failed to insert/update {} plays into database", db_plays.len()))?;
+
+    println!(
+        "✓ Ingested {} plays ({} new, {} updated) for {} ({} skipped due to missing lookups)",
+        stats.ids.len(), stats.inserted, stats.updated, scope, skipped_count
+    );
+    Ok(stats.ids.len())
+}
+
+async fn ingest_game_advanced_stats(pool: &PgPool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
     let scope = match week {
         Some(w) => format!("week {} of year {}", w, year),
         None => format!("year {}", year),
     };
 
-    let api_advanced_stats = api::game_advanced_stats::fetch(year, week)
+    let api_advanced_stats = api::game_advanced_stats::fetch(year, week, season_type)
         .await
         .context(format!("Failed to fetch advanced stats from CFBD API for {}", scope))?;
 

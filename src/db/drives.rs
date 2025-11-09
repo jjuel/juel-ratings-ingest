@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
+use std::collections::HashMap;
 
 pub struct UpsertStats {
     pub ids: Vec<i32>,
@@ -177,4 +178,44 @@ pub struct Drive {
     pub start_defense_score: Option<i32>,
     pub end_offense_score: Option<i32>,
     pub end_defense_score: Option<i32>,
+}
+
+pub async fn build_drive_map(
+    pool: &PgPool,
+    year: i32,
+    week: Option<i32>,
+) -> Result<HashMap<String, i32>, sqlx::Error> {
+    #[derive(sqlx::FromRow)]
+    struct DriveRow {
+        id: i32,
+        cfbd_id: String,
+    }
+
+    let rows: Vec<DriveRow> = match week {
+        Some(w) => {
+            sqlx::query_as(
+                "SELECT d.id, d.cfbd_id
+                 FROM drives d
+                 JOIN games g ON d.game_id = g.id
+                 WHERE g.season = $1 AND g.week = $2"
+            )
+            .bind(year)
+            .bind(w)
+            .fetch_all(pool)
+            .await?
+        }
+        None => {
+            sqlx::query_as(
+                "SELECT d.id, d.cfbd_id
+                 FROM drives d
+                 JOIN games g ON d.game_id = g.id
+                 WHERE g.season = $1"
+            )
+            .bind(year)
+            .fetch_all(pool)
+            .await?
+        }
+    };
+
+    Ok(rows.into_iter().map(|row| (row.cfbd_id, row.id)).collect())
 }
