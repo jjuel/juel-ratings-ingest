@@ -62,6 +62,14 @@ enum Commands {
         #[arg(short, long)]
         season_type: Option<SeasonType>,
     },
+    Havoc {
+        #[arg(short, long, default_value = "2025")]
+        year: u32,
+        #[arg(short, long)]
+        week: Option<u32>,
+        #[arg(short, long)]
+        season_type: Option<SeasonType>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -117,6 +125,7 @@ async fn main() -> Result<()> {
             }
 
             ingest_game_advanced_stats(&pool, *year as i32, week, season_type.clone()).await?;
+            ingest_havoc(&pool, *year as i32, week, season_type.clone()).await?;
 
             let duration = start.elapsed();
             println!("\n✨ All data ingested successfully in {:.2}s\n", duration.as_secs_f64());
@@ -142,6 +151,11 @@ async fn main() -> Result<()> {
             let week = week.map(|w| w as i32);
             let season_type = season_type.map(|st| st.as_str().to_string());
             ingest_game_advanced_stats(&pool, *year as i32, week, season_type).await?;
+        }
+        Commands::Havoc { year, week, season_type } => {
+            let week = week.map(|w| w as i32);
+            let season_type = season_type.map(|st| st.as_str().to_string());
+            ingest_havoc(&pool, *year as i32, week, season_type).await?;
         }
     }
 
@@ -300,6 +314,46 @@ async fn ingest_game_advanced_stats(pool: &PgPool, year: i32, week: Option<i32>,
 
     println!(
         "✓ Ingested {} game advanced stats ({} new, {} updated) for {} ({} skipped due to missing lookups)",
+        stats.ids.len(), stats.inserted, stats.updated, scope, skipped_count
+    );
+    Ok(stats.ids.len())
+}
+
+async fn ingest_havoc(pool: &PgPool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
+    let scope = match week {
+        Some(w) => format!("week {} of year {}", w, year),
+        None => format!("year {}", year),
+    };
+
+    let api_havoc = api::havoc::fetch(year, week, season_type)
+        .await
+        .context(format!("Failed to fetch havoc stats from CFBD API for {}", scope))?;
+
+    let teams_by_name = build_team_name_map(pool)
+        .await
+        .context("Failed to build team name lookup map")?;
+
+    let games_by_cfbd_id = build_game_map(pool, year, week)
+        .await
+        .context(format!("Failed to build game ID lookup map for {}", scope))?;
+
+    let fetched_count = api_havoc.len();
+    let db_havoc: Vec<db::Havoc> = api_havoc
+        .iter()
+        .filter_map(|havoc| {
+            let game_id = games_by_cfbd_id.get(&havoc.game_id)?;
+            db::mappings::map_havoc(havoc, *game_id, &teams_by_name)
+        })
+        .collect();
+
+    let skipped_count = fetched_count - db_havoc.len();
+
+    let stats = db::havoc::upsert_batch(pool, &db_havoc)
+        .await
+        .context(format!("Failed to insert/update {} havoc stats into database", db_havoc.len()))?;
+
+    println!(
+        "✓ Ingested {} havoc stats ({} new, {} updated) for {} ({} skipped due to missing lookups)",
         stats.ids.len(), stats.inserted, stats.updated, scope, skipped_count
     );
     Ok(stats.ids.len())

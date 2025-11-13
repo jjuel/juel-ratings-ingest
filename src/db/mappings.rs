@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::api::drives::{Drive as ApiDrive, DriveClock};
 use crate::api::game_advanced_stats::GameAdvancedStats as ApiGameAdvancedStats;
 use crate::api::games::Game as ApiGame;
+use crate::api::havoc::Havoc as ApiHavoc;
 use crate::api::plays::Play as ApiPlay;
 use crate::api::teams::Team as ApiTeam;
 
@@ -244,5 +245,85 @@ pub fn map_play(
         play_text: api.play_text.clone(),
         ppa: api.ppa,
         wallclock: api.wallclock.clone(),
+    })
+}
+
+pub fn map_havoc(
+    api: &ApiHavoc,
+    game_id: i32,
+    teams_by_name: &HashMap<String, i32>,
+) -> Option<db::Havoc> {
+    // Team name is required for lookup
+    let team_id = teams_by_name.get(&api.team)?;
+
+    // Extract offense stats
+    let (
+        offense_db_havoc_rate,
+        offense_front_seven_havoc_rate,
+        offense_havoc_rate,
+        offense_db_havoc_events,
+        offense_front_seven_havoc_events,
+        offense_total_havoc_events,
+        offense_total_plays,
+    ) = match &api.offense {
+        Some(offense) => (
+            offense.db_havoc_rate,
+            offense.front_seven_havoc_rate,
+            offense.havoc_rate,
+            offense.db_havoc_events,
+            offense.front_seven_havoc_events,
+            offense.total_havoc_events,
+            offense.total_plays,
+        ),
+        None => (None, None, None, None, None, None, None),
+    };
+
+    // Extract defense stats
+    let (
+        defense_db_havoc_rate,
+        defense_front_seven_havoc_rate,
+        defense_havoc_rate,
+        defense_db_havoc_events,
+        defense_front_seven_havoc_events,
+        defense_total_havoc_events,
+        defense_total_plays,
+    ) = match &api.defense {
+        Some(defense) => (
+            defense.db_havoc_rate,
+            defense.front_seven_havoc_rate,
+            defense.havoc_rate,
+            defense.db_havoc_events,
+            defense.front_seven_havoc_events,
+            defense.total_havoc_events,
+            defense.total_plays,
+        ),
+        None => (None, None, None, None, None, None, None),
+    };
+
+    Some(db::Havoc {
+        id: 0,
+        game_id,
+        team_id: *team_id,
+        season: api.season,
+        season_type: api.season_type.clone(),
+        week: api.week,
+        team: api.team.clone(),
+        conference: api.conference.clone(),
+        opponent: api.opponent.clone(),
+        opponent_conference: api.opponent_conference.clone(),
+        offense_db_havoc_rate,
+        offense_front_seven_havoc_rate,
+        offense_havoc_rate,
+        offense_db_havoc_events,
+        offense_front_seven_havoc_events,
+        offense_total_havoc_events,
+        offense_total_plays,
+        defense_db_havoc_rate,
+        defense_front_seven_havoc_rate,
+        defense_havoc_rate,
+        defense_db_havoc_events,
+        defense_front_seven_havoc_events,
+        defense_total_havoc_events,
+        defense_total_plays,
     })
 }
