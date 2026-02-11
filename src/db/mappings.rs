@@ -52,6 +52,7 @@ pub fn map_game(api: &ApiGame) -> db::Game {
         week: api.week,
         season_type: api.season_type.clone(),
         start_date,
+        neutral_site: api.neutral_site,
         home_team: api.home_team.clone(),
         home_points: api.home_points,
         away_team: api.away_team.clone(),

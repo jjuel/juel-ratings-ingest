@@ -23,7 +23,7 @@ pub async fn upsert_batch(pool: &PgPool, games: &[Game]) -> Result<UpsertStats, 
 
     let mut query_builder = sqlx::QueryBuilder::new(
         "INSERT INTO games (
-            cfbd_id, season, week, season_type, start_date,
+            cfbd_id, season, week, season_type, start_date, neutral_site,
             home_team, home_points, away_team, away_points
         ) ",
     );
@@ -34,6 +34,7 @@ pub async fn upsert_batch(pool: &PgPool, games: &[Game]) -> Result<UpsertStats, 
             .push_bind(game.week)
             .push_bind(&game.season_type)
             .push_bind(game.start_date)
+            .push_bind(game.neutral_site)
             .push_bind(&game.home_team)
             .push_bind(game.home_points)
             .push_bind(&game.away_team)
@@ -46,15 +47,16 @@ pub async fn upsert_batch(pool: &PgPool, games: &[Game]) -> Result<UpsertStats, 
             week = EXCLUDED.week,
             season_type = EXCLUDED.season_type,
             start_date = EXCLUDED.start_date,
+            neutral_site = EXCLUDED.neutral_site,
             home_team = EXCLUDED.home_team,
             home_points = EXCLUDED.home_points,
             away_team = EXCLUDED.away_team,
             away_points = EXCLUDED.away_points
         WHERE (
-            games.season, games.week, games.season_type, games.start_date,
+            games.season, games.week, games.season_type, games.start_date, games.neutral_site,
             games.home_team, games.home_points, games.away_team, games.away_points
         ) IS DISTINCT FROM (
-            EXCLUDED.season, EXCLUDED.week, EXCLUDED.season_type, EXCLUDED.start_date,
+            EXCLUDED.season, EXCLUDED.week, EXCLUDED.season_type, EXCLUDED.start_date, EXCLUDED.neutral_site,
             EXCLUDED.home_team, EXCLUDED.home_points, EXCLUDED.away_team, EXCLUDED.away_points
         )
         RETURNING id, (xmax = 0) AS created",
@@ -118,6 +120,7 @@ pub struct Game {
     pub week: i32,
     pub season_type: String,
     pub start_date: DateTime<Utc>,
+    pub neutral_site: Option<bool>,
     pub home_team: String,
     pub home_points: Option<i32>,
     pub away_team: String,

@@ -37,6 +37,8 @@ pub struct Game {
     pub season_type: String,
     #[serde(rename = "startDate")]
     pub start_date: String,
+    #[serde(rename = "neutralSite")]
+    pub neutral_site: Option<bool>,
     #[serde(rename = "homeTeam")]
     pub home_team: String,
     #[serde(rename = "homePoints")]
