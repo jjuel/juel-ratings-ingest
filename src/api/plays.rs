@@ -10,7 +10,10 @@ pub async fn fetch(year: i32, week: i32, season_type: Option<String>) -> Result<
     // Default to 'regular' season type if not provided
     let season_type = season_type.unwrap_or_else(|| "regular".to_string());
 
-    let url = format!("{}plays?year={}&week={}&seasonType={}", CFBD_BASE_URL, year, week, season_type);
+    let url = format!(
+        "{}plays?year={}&week={}&seasonType={}",
+        CFBD_BASE_URL, year, week, season_type
+    );
 
     let response = client
         .get(&url)
@@ -21,7 +24,10 @@ pub async fn fetch(year: i32, week: i32, season_type: Option<String>) -> Result<
 
     // Check if response is successful
     let status = response.status();
-    let response_text = response.text().await.context("Failed to read response body")?;
+    let response_text = response
+        .text()
+        .await
+        .context("Failed to read response body")?;
 
     if !status.is_success() {
         eprintln!("API Error ({}): {}", status, response_text);
@@ -36,7 +42,10 @@ pub async fn fetch(year: i32, week: i32, season_type: Option<String>) -> Result<
         }
         Err(e) => {
             eprintln!("Failed to parse response: {}", e);
-            eprintln!("Response (first 500 chars): {}", &response_text[..response_text.len().min(500)]);
+            eprintln!(
+                "Response (first 500 chars): {}",
+                &response_text[..response_text.len().min(500)]
+            );
             anyhow::bail!("Failed to deserialize plays response: {}", e)
         }
     }

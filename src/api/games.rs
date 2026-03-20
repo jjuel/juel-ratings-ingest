@@ -3,7 +3,11 @@ use crate::api::client::{create_client, get_api_key};
 use reqwest::Error;
 use serde::{Deserialize, Serialize};
 
-pub async fn fetch(year: i32, week: Option<i32>, season_type: Option<String>) -> Result<Vec<Game>, Error> {
+pub async fn fetch(
+    year: i32,
+    week: Option<i32>,
+    season_type: Option<String>,
+) -> Result<Vec<Game>, Error> {
     let token = get_api_key();
     let client = create_client();
 

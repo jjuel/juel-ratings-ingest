@@ -32,6 +32,8 @@ pub struct Team {
     pub color: Option<String>,
     #[serde(rename = "alternateColor")]
     pub alternate_color: Option<String>,
+    #[serde(default)]
+    pub logos: Option<Vec<String>>,
     pub twitter: Option<String>,
 
     #[serde(default)]

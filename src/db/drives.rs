@@ -9,6 +9,8 @@ pub struct UpsertStats {
 }
 
 pub async fn upsert_batch(pool: &SqlitePool, drives: &[Drive]) -> Result<UpsertStats, sqlx::Error> {
+    const LOOKUP_CHUNK_SIZE: usize = 900;
+
     if drives.is_empty() {
         return Ok(UpsertStats {
             ids: vec![],
@@ -19,7 +21,7 @@ pub async fn upsert_batch(pool: &SqlitePool, drives: &[Drive]) -> Result<UpsertS
 
     let mut tx = pool.begin().await?;
 
-    let existing_ids: Vec<(String,)> = {
+    let existing_set: std::collections::HashSet<String> = {
         let cfbd_ids: Vec<&str> = drives.iter().map(|d| d.cfbd_id.as_str()).collect();
         if cfbd_ids.is_empty() {
             return Ok(UpsertStats {
@@ -28,19 +30,26 @@ pub async fn upsert_batch(pool: &SqlitePool, drives: &[Drive]) -> Result<UpsertS
                 updated: 0,
             });
         }
-        let placeholders: Vec<&str> = cfbd_ids.iter().map(|_| "?").collect();
-        let query = format!(
-            "SELECT cfbd_id FROM drives WHERE cfbd_id IN ({})",
-            placeholders.join(", ")
-        );
-        let mut query = sqlx::query_as::<_, (String,)>(&query);
-        for id in cfbd_ids {
-            query = query.bind(id);
-        }
-        query.fetch_all(&mut *tx).await?
-    };
 
-    let existing_set: std::collections::HashSet<String> = existing_ids.into_iter().map(|(id,)| id).collect();
+        let mut existing = std::collections::HashSet::new();
+        for chunk in cfbd_ids.chunks(LOOKUP_CHUNK_SIZE) {
+            let placeholders: Vec<&str> = chunk.iter().map(|_| "?").collect();
+            let query = format!(
+                "SELECT cfbd_id FROM drives WHERE cfbd_id IN ({})",
+                placeholders.join(", ")
+            );
+            let mut query = sqlx::query_as::<_, (String,)>(&query);
+            for id in chunk {
+                query = query.bind(*id);
+            }
+
+            for (id,) in query.fetch_all(&mut *tx).await? {
+                existing.insert(id);
+            }
+        }
+
+        existing
+    };
 
     let mut all_ids = Vec::new();
     let mut total_inserted = 0;
@@ -212,7 +221,7 @@ pub async fn build_drive_map(
                 "SELECT d.id, d.cfbd_id
                  FROM drives d
                  JOIN games g ON d.game_id = g.id
-                 WHERE g.season = ? AND g.week = ?"
+                 WHERE g.season = ? AND g.week = ?",
             )
             .bind(year)
             .bind(w)
@@ -224,7 +233,7 @@ pub async fn build_drive_map(
                 "SELECT d.id, d.cfbd_id
                  FROM drives d
                  JOIN games g ON d.game_id = g.id
-                 WHERE g.season = ?"
+                 WHERE g.season = ?",
             )
             .bind(year)
             .fetch_all(pool)

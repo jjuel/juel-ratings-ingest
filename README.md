@@ -37,13 +37,13 @@ Create a `.env` file in the project root:
 CFBD_API_KEY=your_api_key_here
 
 # SQLite database URL (required)
-DATABASE_URL=sqlite://juel_ratings.db
+DATABASE_URL=sqlite:////home/jsj/data/juel-ratings/juel_ratings.db
 ```
 
 **Example:**
 ```bash
 CFBD_API_KEY=abcd1234567890xyz
-DATABASE_URL=sqlite://juel_ratings.db
+DATABASE_URL=sqlite:////home/jsj/data/juel-ratings/juel_ratings.db
 ```
 
 ### 3. Run Database Migrations
@@ -62,6 +62,14 @@ sqlx migrate run
 ```
 
 This creates the SQLite schema, views, and indexes used by the ingest pipeline.
+
+Recommended shared setup:
+
+```bash
+mkdir -p ~/data/juel-ratings
+```
+
+Use the same `DATABASE_URL` in both `juel-ratings-ingest` and the ratings project so they point at the same SQLite file.
 
 ## Usage
 
@@ -180,7 +188,7 @@ sqlx migrate run
 **Problem:** Invalid SQLite path, missing file permissions, or malformed `DATABASE_URL`.
 
 **Solution:**
-- Verify `DATABASE_URL` in `.env` looks like `sqlite://juel_ratings.db`
+- Verify `DATABASE_URL` in `.env` looks like `sqlite:////home/jsj/data/juel-ratings/juel_ratings.db`
 - Ensure the parent directory is writable
 - If needed, delete the DB file and let the app recreate it
 

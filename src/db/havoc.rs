@@ -7,7 +7,10 @@ pub struct UpsertStats {
     pub updated: usize,
 }
 
-pub async fn upsert_batch(pool: &SqlitePool, havoc_stats: &[Havoc]) -> Result<UpsertStats, sqlx::Error> {
+pub async fn upsert_batch(
+    pool: &SqlitePool,
+    havoc_stats: &[Havoc],
+) -> Result<UpsertStats, sqlx::Error> {
     if havoc_stats.is_empty() {
         return Ok(UpsertStats {
             ids: vec![],
@@ -30,7 +33,7 @@ pub async fn upsert_batch(pool: &SqlitePool, havoc_stats: &[Havoc]) -> Result<Up
         let mut existing: Vec<(i32, i32)> = Vec::new();
         for &(game_id, team_id) in &keys {
             let row: Option<(i32, i32)> = sqlx::query_as(
-                "SELECT game_id, team_id FROM havoc WHERE game_id = ? AND team_id = ?"
+                "SELECT game_id, team_id FROM havoc WHERE game_id = ? AND team_id = ?",
             )
             .bind(game_id)
             .bind(team_id)

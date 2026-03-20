@@ -22,6 +22,8 @@ pub fn map_team(api: &ApiTeam) -> db::Team {
         classification: api.classification.clone(),
         color: api.color.clone(),
         alternate_color: api.alternate_color.clone(),
+        logo_url: api.logos.as_ref().and_then(|logos| logos.first().cloned()),
+        alternate_logo_url: api.logos.as_ref().and_then(|logos| logos.get(1).cloned()),
         twitter: api.twitter.clone(),
         city: api.location.as_ref().and_then(|l| l.city.clone()),
         state: api.location.as_ref().and_then(|l| l.state.clone()),

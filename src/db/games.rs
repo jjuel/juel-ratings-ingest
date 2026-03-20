@@ -11,6 +11,8 @@ pub struct UpsertStats {
 }
 
 pub async fn upsert_batch(pool: &SqlitePool, games: &[Game]) -> Result<UpsertStats, sqlx::Error> {
+    const LOOKUP_CHUNK_SIZE: usize = 900;
+
     if games.is_empty() {
         return Ok(UpsertStats {
             ids: vec![],
@@ -21,7 +23,7 @@ pub async fn upsert_batch(pool: &SqlitePool, games: &[Game]) -> Result<UpsertSta
 
     let mut tx = pool.begin().await?;
 
-    let existing_cfbd_ids: Vec<(i64,)> = {
+    let existing_set: std::collections::HashSet<i64> = {
         let cfbd_ids: Vec<i64> = games.iter().map(|g| g.cfbd_id).collect();
         if cfbd_ids.is_empty() {
             return Ok(UpsertStats {
@@ -30,19 +32,26 @@ pub async fn upsert_batch(pool: &SqlitePool, games: &[Game]) -> Result<UpsertSta
                 updated: 0,
             });
         }
-        let placeholders: Vec<&str> = cfbd_ids.iter().map(|_| "?").collect();
-        let query = format!(
-            "SELECT cfbd_id FROM games WHERE cfbd_id IN ({})",
-            placeholders.join(", ")
-        );
-        let mut query = sqlx::query_as::<_, (i64,)>(&query);
-        for id in cfbd_ids {
-            query = query.bind(id);
-        }
-        query.fetch_all(&mut *tx).await?
-    };
 
-    let existing_set: std::collections::HashSet<i64> = existing_cfbd_ids.into_iter().map(|(id,)| id).collect();
+        let mut existing = std::collections::HashSet::new();
+        for chunk in cfbd_ids.chunks(LOOKUP_CHUNK_SIZE) {
+            let placeholders: Vec<&str> = chunk.iter().map(|_| "?").collect();
+            let query = format!(
+                "SELECT cfbd_id FROM games WHERE cfbd_id IN ({})",
+                placeholders.join(", ")
+            );
+            let mut query = sqlx::query_as::<_, (i64,)>(&query);
+            for id in chunk {
+                query = query.bind(*id);
+            }
+
+            for (id,) in query.fetch_all(&mut *tx).await? {
+                existing.insert(id);
+            }
+        }
+
+        existing
+    };
 
     let mut all_ids = Vec::new();
     let mut total_inserted = 0;

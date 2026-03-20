@@ -10,6 +10,8 @@ pub struct UpsertStats {
 }
 
 pub async fn upsert_batch(pool: &SqlitePool, teams: &[Team]) -> Result<UpsertStats, sqlx::Error> {
+    const LOOKUP_CHUNK_SIZE: usize = 900;
+
     if teams.is_empty() {
         return Ok(UpsertStats {
             ids: vec![],
@@ -20,7 +22,7 @@ pub async fn upsert_batch(pool: &SqlitePool, teams: &[Team]) -> Result<UpsertSta
 
     let mut tx = pool.begin().await?;
 
-    let existing_cfbd_ids: Vec<(i32,)> = {
+    let existing_set: HashSet<i32> = {
         let cfbd_ids: Vec<i32> = teams.iter().map(|t| t.cfbd_id).collect();
         if cfbd_ids.is_empty() {
             return Ok(UpsertStats {
@@ -29,19 +31,26 @@ pub async fn upsert_batch(pool: &SqlitePool, teams: &[Team]) -> Result<UpsertSta
                 updated: 0,
             });
         }
-        let placeholders: Vec<&str> = cfbd_ids.iter().map(|_| "?").collect();
-        let query = format!(
-            "SELECT cfbd_id FROM teams WHERE cfbd_id IN ({})",
-            placeholders.join(", ")
-        );
-        let mut query = sqlx::query_as::<_, (i32,)>(&query);
-        for id in cfbd_ids {
-            query = query.bind(id);
-        }
-        query.fetch_all(&mut *tx).await?
-    };
 
-    let existing_set: HashSet<i32> = existing_cfbd_ids.into_iter().map(|(id,)| id).collect();
+        let mut existing = HashSet::new();
+        for chunk in cfbd_ids.chunks(LOOKUP_CHUNK_SIZE) {
+            let placeholders: Vec<&str> = chunk.iter().map(|_| "?").collect();
+            let query = format!(
+                "SELECT cfbd_id FROM teams WHERE cfbd_id IN ({})",
+                placeholders.join(", ")
+            );
+            let mut query = sqlx::query_as::<_, (i32,)>(&query);
+            for id in chunk {
+                query = query.bind(*id);
+            }
+
+            for (id,) in query.fetch_all(&mut *tx).await? {
+                existing.insert(id);
+            }
+        }
+
+        existing
+    };
 
     let mut all_ids = Vec::new();
     let mut total_inserted = 0;
@@ -55,8 +64,8 @@ pub async fn upsert_batch(pool: &SqlitePool, teams: &[Team]) -> Result<UpsertSta
         }
 
         let id = sqlx::query_as::<_, (i32,)>(
-            "INSERT INTO teams (cfbd_id, school, mascot, abbreviation, conference, division, classification, color, alternate_color, twitter, city, state, zip, country_code, timezone, latitude, longitude, elevation, capacity, construction_year, grass, dome, alternate_names)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO teams (cfbd_id, school, mascot, abbreviation, conference, division, classification, color, alternate_color, logo_url, alternate_logo_url, twitter, city, state, zip, country_code, timezone, latitude, longitude, elevation, capacity, construction_year, grass, dome, alternate_names)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(cfbd_id) DO UPDATE SET
                  school = excluded.school,
                  mascot = excluded.mascot,
@@ -66,6 +75,8 @@ pub async fn upsert_batch(pool: &SqlitePool, teams: &[Team]) -> Result<UpsertSta
                  classification = excluded.classification,
                  color = excluded.color,
                  alternate_color = excluded.alternate_color,
+                 logo_url = excluded.logo_url,
+                 alternate_logo_url = excluded.alternate_logo_url,
                  twitter = excluded.twitter,
                  city = excluded.city,
                  state = excluded.state,
@@ -84,13 +95,15 @@ pub async fn upsert_batch(pool: &SqlitePool, teams: &[Team]) -> Result<UpsertSta
                 OR teams.mascot IS NOT excluded.mascot
                 OR teams.abbreviation IS NOT excluded.abbreviation
                 OR teams.conference IS NOT excluded.conference
-                OR teams.division IS NOT excluded.division
-                OR teams.classification IS NOT excluded.classification
-                OR teams.color IS NOT excluded.color
-                OR teams.alternate_color IS NOT excluded.alternate_color
-                OR teams.twitter IS NOT excluded.twitter
-                OR teams.city IS NOT excluded.city
-                OR teams.state IS NOT excluded.state
+                 OR teams.division IS NOT excluded.division
+                 OR teams.classification IS NOT excluded.classification
+                 OR teams.color IS NOT excluded.color
+                 OR teams.alternate_color IS NOT excluded.alternate_color
+                 OR teams.logo_url IS NOT excluded.logo_url
+                 OR teams.alternate_logo_url IS NOT excluded.alternate_logo_url
+                 OR teams.twitter IS NOT excluded.twitter
+                 OR teams.city IS NOT excluded.city
+                 OR teams.state IS NOT excluded.state
                 OR teams.zip IS NOT excluded.zip
                 OR teams.country_code IS NOT excluded.country_code
                 OR teams.timezone IS NOT excluded.timezone
@@ -113,6 +126,8 @@ pub async fn upsert_batch(pool: &SqlitePool, teams: &[Team]) -> Result<UpsertSta
         .bind(&team.classification)
         .bind(&team.color)
         .bind(&team.alternate_color)
+        .bind(&team.logo_url)
+        .bind(&team.alternate_logo_url)
         .bind(&team.twitter)
         .bind(&team.city)
         .bind(&team.state)
@@ -176,6 +191,8 @@ pub struct Team {
     pub classification: Option<String>,
     pub color: Option<String>,
     pub alternate_color: Option<String>,
+    pub logo_url: Option<String>,
+    pub alternate_logo_url: Option<String>,
     pub twitter: Option<String>,
     pub city: Option<String>,
     pub state: Option<String>,

@@ -23,13 +23,12 @@ pub async fn upsert_batch(
 
     let mut existing_set = std::collections::HashSet::new();
     for stat in stats {
-        let exists: Option<(i32,)> = sqlx::query_as(
-            "SELECT 1 FROM game_advanced_stats WHERE game_id = ? AND team_id = ?",
-        )
-        .bind(stat.game_id)
-        .bind(stat.team_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+        let exists: Option<(i32,)> =
+            sqlx::query_as("SELECT 1 FROM game_advanced_stats WHERE game_id = ? AND team_id = ?")
+                .bind(stat.game_id)
+                .bind(stat.team_id)
+                .fetch_optional(&mut *tx)
+                .await?;
 
         if exists.is_some() {
             existing_set.insert((stat.game_id, stat.team_id));
@@ -47,7 +46,8 @@ pub async fn upsert_batch(
             total_inserted += 1;
         }
 
-        let id = sqlx::query_as::<_, (i32,)>(
+        let placeholders = std::iter::repeat_n("?", 60).collect::<Vec<_>>().join(", ");
+        let sql = format!(
             "INSERT INTO game_advanced_stats (
                 game_id, team_id, opponent_id,
                 offense_passing_plays_explosiveness, offense_passing_plays_success_rate,
@@ -81,35 +81,7 @@ pub async fn upsert_batch(
                 defense_total_ppa, defense_ppa,
                 defense_drives, defense_plays,
                 raw
-            ) VALUES (
-                ?, ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?,
-                ?, ?, ?
-            )
+            ) VALUES ({})
             ON CONFLICT(game_id, team_id) DO UPDATE SET
                 opponent_id = excluded.opponent_id,
                 offense_passing_plays_explosiveness = excluded.offense_passing_plays_explosiveness,
@@ -228,69 +200,72 @@ pub async fn upsert_batch(
                 OR game_advanced_stats.defense_plays IS NOT excluded.defense_plays
                 OR game_advanced_stats.raw IS NOT excluded.raw
             RETURNING id",
-        )
-        .bind(stat.game_id)
-        .bind(stat.team_id)
-        .bind(stat.opponent_id)
-        .bind(stat.offense_passing_plays_explosiveness)
-        .bind(stat.offense_passing_plays_success_rate)
-        .bind(stat.offense_passing_plays_total_ppa)
-        .bind(stat.offense_passing_plays_ppa)
-        .bind(stat.offense_rushing_plays_explosiveness)
-        .bind(stat.offense_rushing_plays_success_rate)
-        .bind(stat.offense_rushing_plays_total_ppa)
-        .bind(stat.offense_rushing_plays_ppa)
-        .bind(stat.offense_passing_downs_explosiveness)
-        .bind(stat.offense_passing_downs_success_rate)
-        .bind(stat.offense_passing_downs_ppa)
-        .bind(stat.offense_standard_downs_explosiveness)
-        .bind(stat.offense_standard_downs_success_rate)
-        .bind(stat.offense_standard_downs_ppa)
-        .bind(stat.offense_open_field_yards_total)
-        .bind(stat.offense_open_field_yards)
-        .bind(stat.offense_second_level_yards_total)
-        .bind(stat.offense_second_level_yards)
-        .bind(stat.offense_line_yards_total)
-        .bind(stat.offense_line_yards)
-        .bind(stat.offense_stuff_rate)
-        .bind(stat.offense_power_success)
-        .bind(stat.offense_explosiveness)
-        .bind(stat.offense_success_rate)
-        .bind(stat.offense_total_ppa)
-        .bind(stat.offense_ppa)
-        .bind(stat.offense_drives)
-        .bind(stat.offense_plays)
-        .bind(stat.defense_passing_plays_explosiveness)
-        .bind(stat.defense_passing_plays_success_rate)
-        .bind(stat.defense_passing_plays_total_ppa)
-        .bind(stat.defense_passing_plays_ppa)
-        .bind(stat.defense_rushing_plays_explosiveness)
-        .bind(stat.defense_rushing_plays_success_rate)
-        .bind(stat.defense_rushing_plays_total_ppa)
-        .bind(stat.defense_rushing_plays_ppa)
-        .bind(stat.defense_passing_downs_explosiveness)
-        .bind(stat.defense_passing_downs_success_rate)
-        .bind(stat.defense_passing_downs_ppa)
-        .bind(stat.defense_standard_downs_explosiveness)
-        .bind(stat.defense_standard_downs_success_rate)
-        .bind(stat.defense_standard_downs_ppa)
-        .bind(stat.defense_open_field_yards_total)
-        .bind(stat.defense_open_field_yards)
-        .bind(stat.defense_second_level_yards_total)
-        .bind(stat.defense_second_level_yards)
-        .bind(stat.defense_line_yards_total)
-        .bind(stat.defense_line_yards)
-        .bind(stat.defense_stuff_rate)
-        .bind(stat.defense_power_success)
-        .bind(stat.defense_explosiveness)
-        .bind(stat.defense_success_rate)
-        .bind(stat.defense_total_ppa)
-        .bind(stat.defense_ppa)
-        .bind(stat.defense_drives)
-        .bind(stat.defense_plays)
-        .bind(&stat.raw)
-        .fetch_optional(&mut *tx)
-        .await?;
+            placeholders
+        );
+
+        let id = sqlx::query_as::<_, (i32,)>(&sql)
+            .bind(stat.game_id)
+            .bind(stat.team_id)
+            .bind(stat.opponent_id)
+            .bind(stat.offense_passing_plays_explosiveness)
+            .bind(stat.offense_passing_plays_success_rate)
+            .bind(stat.offense_passing_plays_total_ppa)
+            .bind(stat.offense_passing_plays_ppa)
+            .bind(stat.offense_rushing_plays_explosiveness)
+            .bind(stat.offense_rushing_plays_success_rate)
+            .bind(stat.offense_rushing_plays_total_ppa)
+            .bind(stat.offense_rushing_plays_ppa)
+            .bind(stat.offense_passing_downs_explosiveness)
+            .bind(stat.offense_passing_downs_success_rate)
+            .bind(stat.offense_passing_downs_ppa)
+            .bind(stat.offense_standard_downs_explosiveness)
+            .bind(stat.offense_standard_downs_success_rate)
+            .bind(stat.offense_standard_downs_ppa)
+            .bind(stat.offense_open_field_yards_total)
+            .bind(stat.offense_open_field_yards)
+            .bind(stat.offense_second_level_yards_total)
+            .bind(stat.offense_second_level_yards)
+            .bind(stat.offense_line_yards_total)
+            .bind(stat.offense_line_yards)
+            .bind(stat.offense_stuff_rate)
+            .bind(stat.offense_power_success)
+            .bind(stat.offense_explosiveness)
+            .bind(stat.offense_success_rate)
+            .bind(stat.offense_total_ppa)
+            .bind(stat.offense_ppa)
+            .bind(stat.offense_drives)
+            .bind(stat.offense_plays)
+            .bind(stat.defense_passing_plays_explosiveness)
+            .bind(stat.defense_passing_plays_success_rate)
+            .bind(stat.defense_passing_plays_total_ppa)
+            .bind(stat.defense_passing_plays_ppa)
+            .bind(stat.defense_rushing_plays_explosiveness)
+            .bind(stat.defense_rushing_plays_success_rate)
+            .bind(stat.defense_rushing_plays_total_ppa)
+            .bind(stat.defense_rushing_plays_ppa)
+            .bind(stat.defense_passing_downs_explosiveness)
+            .bind(stat.defense_passing_downs_success_rate)
+            .bind(stat.defense_passing_downs_ppa)
+            .bind(stat.defense_standard_downs_explosiveness)
+            .bind(stat.defense_standard_downs_success_rate)
+            .bind(stat.defense_standard_downs_ppa)
+            .bind(stat.defense_open_field_yards_total)
+            .bind(stat.defense_open_field_yards)
+            .bind(stat.defense_second_level_yards_total)
+            .bind(stat.defense_second_level_yards)
+            .bind(stat.defense_line_yards_total)
+            .bind(stat.defense_line_yards)
+            .bind(stat.defense_stuff_rate)
+            .bind(stat.defense_power_success)
+            .bind(stat.defense_explosiveness)
+            .bind(stat.defense_success_rate)
+            .bind(stat.defense_total_ppa)
+            .bind(stat.defense_ppa)
+            .bind(stat.defense_drives)
+            .bind(stat.defense_plays)
+            .bind(&stat.raw)
+            .fetch_optional(&mut *tx)
+            .await?;
 
         if let Some(id) = id {
             all_ids.push(id.0);
