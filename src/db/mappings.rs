@@ -35,7 +35,7 @@ pub fn map_team(api: &ApiTeam) -> db::Team {
         construction_year: api.location.as_ref().and_then(|l| l.construction_year),
         grass: api.location.as_ref().and_then(|l| l.grass),
         dome: api.location.as_ref().and_then(|l| l.dome),
-        alternate_names: api.alternate_names.clone(),
+        alternate_names: serde_json::to_string(&api.alternate_names).ok(),
     }
 }
 
@@ -198,8 +198,14 @@ pub fn map_play(
     drives_by_cfbd_id: &HashMap<String, i32>,
 ) -> Option<db::Play> {
     // Both offense and defense team names are required
-    let offense_team_id = api.offense.as_ref().and_then(|name| teams_by_name.get(name))?;
-    let defense_team_id = api.defense.as_ref().and_then(|name| teams_by_name.get(name))?;
+    let offense_team_id = api
+        .offense
+        .as_ref()
+        .and_then(|name| teams_by_name.get(name))?;
+    let defense_team_id = api
+        .defense
+        .as_ref()
+        .and_then(|name| teams_by_name.get(name))?;
 
     // Split clock into minutes and seconds
     let (clock_minutes, clock_seconds) = match &api.clock {
@@ -208,7 +214,11 @@ pub fn map_play(
     };
 
     // Look up drive_id by cfbd_drive_id if available
-    let drive_id = api.drive_id.as_ref().and_then(|cfbd_drive_id| drives_by_cfbd_id.get(cfbd_drive_id)).copied();
+    let drive_id = api
+        .drive_id
+        .as_ref()
+        .and_then(|cfbd_drive_id| drives_by_cfbd_id.get(cfbd_drive_id))
+        .copied();
 
     // Require cfbd_id
     let cfbd_id = api.id.as_ref()?.clone();

@@ -1,11 +1,11 @@
 # Juel Ratings Ingest
 
-A Rust-based CLI tool for ingesting college football data from the College Football Database (CFBD) API and storing it in PostgreSQL for Juel Ratings calculations.
+A Rust-based CLI tool for ingesting college football data from the College Football Database (CFBD) API and storing it in SQLite for Juel Ratings calculations.
 
 ## Features
 
 - ✅ Fetch teams, games, drives, and advanced statistics from CFBD API
-- ✅ Store data in PostgreSQL with referential integrity
+- ✅ Store data in SQLite with referential integrity
 - ✅ Idempotent upserts (safe to run multiple times)
 - ✅ Smart upsert tracking (distinguishes inserts, updates, and unchanged data)
 - ✅ Performance optimized (skips updating records when data is identical)
@@ -15,7 +15,7 @@ A Rust-based CLI tool for ingesting college football data from the College Footb
 ## Prerequisites
 
 - **Rust** (1.70+) - [Install Rust](https://rustup.rs/)
-- **PostgreSQL** (12+) - Running and accessible
+- **SQLite** - Local database file path configured in `DATABASE_URL`
 - **CFBD API Key** - [Get your free API key](https://collegefootballdata.com/key)
 
 ## Setup
@@ -36,35 +36,36 @@ Create a `.env` file in the project root:
 # CFBD API Key (required)
 CFBD_API_KEY=your_api_key_here
 
-# PostgreSQL connection string (required)
-DATABASE_URL=postgresql://username:password@localhost/database_name
+# SQLite database URL (required)
+DATABASE_URL=sqlite://juel_ratings.db
 ```
 
 **Example:**
 ```bash
 CFBD_API_KEY=abcd1234567890xyz
-DATABASE_URL=postgresql://juel_ratings_app:password@localhost/juel_ratings
+DATABASE_URL=sqlite://juel_ratings.db
 ```
 
 ### 3. Run Database Migrations
 
-Install sqlx-cli if you haven't already:
+Migrations run automatically on startup through `sqlx::migrate!`, so a normal app run is enough to initialize the schema:
 
 ```bash
-cargo install sqlx-cli --no-default-features --features postgres
+cargo run --release -- teams --year 2024
 ```
 
-Run migrations to create tables:
+If you want to manage migrations manually, install `sqlx-cli` with SQLite support:
 
 ```bash
+cargo install sqlx-cli --no-default-features --features sqlite
 sqlx migrate run
 ```
 
-This creates four tables: `teams`, `games`, `drives`, and `game_advanced_stats`.
+This creates the SQLite schema, views, and indexes used by the ingest pipeline.
 
 ## Usage
 
-The tool provides five CLI commands:
+The tool provides six CLI commands:
 
 ### Ingest All Data for a Week
 
@@ -109,9 +110,19 @@ cargo run --release -- games --year 2024 --week 10
 cargo run --release -- drives --year 2024 --week 10
 ```
 
+**Plays (by year and week):**
+```bash
+cargo run --release -- plays --year 2024 --week 10
+```
+
 **Advanced Stats (by year and week):**
 ```bash
 cargo run --release -- adv-stats --year 2024 --week 10
+```
+
+**Havoc (by year and week):**
+```bash
+cargo run --release -- havoc --year 2024 --week 10
 ```
 
 ### Using Defaults
@@ -146,7 +157,7 @@ The `all` command handles this order automatically.
 
 ## Troubleshooting
 
-### "relation does not exist" error
+### "no such table" error
 
 **Problem:** Database migrations haven't been run.
 
@@ -166,12 +177,12 @@ sqlx migrate run
 
 ### "Failed to connect to database"
 
-**Problem:** PostgreSQL not running or wrong credentials.
+**Problem:** Invalid SQLite path, missing file permissions, or malformed `DATABASE_URL`.
 
 **Solution:**
-- Ensure PostgreSQL is running: `systemctl status postgresql`
-- Verify `DATABASE_URL` in `.env` has correct username, password, and database name
-- Test connection: `psql $DATABASE_URL`
+- Verify `DATABASE_URL` in `.env` looks like `sqlite://juel_ratings.db`
+- Ensure the parent directory is writable
+- If needed, delete the DB file and let the app recreate it
 
 ### "X drives skipped due to missing lookups"
 
@@ -184,36 +195,38 @@ sqlx migrate run
 
 ### Compilation errors about sqlx macros
 
-**Problem:** sqlx needs database connection during compilation.
+**Problem:** sqlx metadata or local environment is out of sync.
 
 **Solution:**
-- Ensure PostgreSQL is running
+- Ensure `DATABASE_URL` points to a valid SQLite file
 - Ensure migrations have been run
 - Ensure `DATABASE_URL` is in `.env`
 - Run `cargo clean && cargo build`
 
 ## Database Schema
 
-The tool creates four main tables:
+The tool creates six main tables:
 
 - **teams** - College football teams with location data (venues, coordinates)
 - **games** - Game results by year, week, and season type
 - **drives** - Individual drive data with scoring and field position
+- **plays** - Individual play data linked to games and drives
 - **game_advanced_stats** - Advanced analytics (PPA, success rates, explosiveness, etc.)
+- **havoc** - Havoc rate and event breakdowns by team and game
 
 All tables use:
 - Auto-incrementing internal `id` as PRIMARY KEY
 - CFBD's ID stored as `cfbd_id` with UNIQUE constraint
 - Smart upserts with `ON CONFLICT DO UPDATE WHERE (data changed)`
   - Only updates records when data actually differs (performance optimization)
-  - Uses PostgreSQL's `IS DISTINCT FROM` for NULL-safe comparisons
-  - Tracks inserts vs updates using `xmax = 0` system column
+  - Uses SQLite's null-safe `IS NOT` comparisons in conflict guards
+  - Returns changed row ids with `RETURNING id`
 
 ## Performance Notes
 
 - **API Rate Limits**: CFBD has rate limits. The tool makes sequential requests.
 - **First Run**: Ingesting a full week takes 5-10 seconds depending on API response time.
-- **Subsequent Runs**: Same duration (upserts update existing records).
+- **Subsequent Runs**: Usually faster on unchanged data because smart upserts skip writes.
 - **Large Batches**: Consider adding delays between weeks if ingesting multiple weeks.
 
 ## Development

@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 pub struct UpsertStats {
     pub ids: Vec<i32>,
@@ -9,7 +9,7 @@ pub struct UpsertStats {
     pub updated: usize,
 }
 
-pub async fn upsert_batch(pool: &PgPool, teams: &[Team]) -> Result<UpsertStats, sqlx::Error> {
+pub async fn upsert_batch(pool: &SqlitePool, teams: &[Team]) -> Result<UpsertStats, sqlx::Error> {
     if teams.is_empty() {
         return Ok(UpsertStats {
             ids: vec![],
@@ -20,110 +20,144 @@ pub async fn upsert_batch(pool: &PgPool, teams: &[Team]) -> Result<UpsertStats, 
 
     let mut tx = pool.begin().await?;
 
-    let mut query_builder = sqlx::QueryBuilder::new(
-        "INSERT INTO teams (
-            cfbd_id, school, mascot, abbreviation, conference, division,
-            classification, color, alternate_color, twitter, city, state,
-            zip, country_code, timezone, latitude, longitude, elevation,
-            capacity, construction_year, grass, dome, alternate_names
-        ) ",
-    );
+    let existing_cfbd_ids: Vec<(i32,)> = {
+        let cfbd_ids: Vec<i32> = teams.iter().map(|t| t.cfbd_id).collect();
+        if cfbd_ids.is_empty() {
+            return Ok(UpsertStats {
+                ids: vec![],
+                inserted: 0,
+                updated: 0,
+            });
+        }
+        let placeholders: Vec<&str> = cfbd_ids.iter().map(|_| "?").collect();
+        let query = format!(
+            "SELECT cfbd_id FROM teams WHERE cfbd_id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut query = sqlx::query_as::<_, (i32,)>(&query);
+        for id in cfbd_ids {
+            query = query.bind(id);
+        }
+        query.fetch_all(&mut *tx).await?
+    };
 
-    query_builder.push_values(teams, |mut b, team| {
-        b.push_bind(team.cfbd_id)
-            .push_bind(&team.school)
-            .push_bind(&team.mascot)
-            .push_bind(&team.abbreviation)
-            .push_bind(&team.conference)
-            .push_bind(&team.division)
-            .push_bind(&team.classification)
-            .push_bind(&team.color)
-            .push_bind(&team.alternate_color)
-            .push_bind(&team.twitter)
-            .push_bind(&team.city)
-            .push_bind(&team.state)
-            .push_bind(&team.zip)
-            .push_bind(&team.country_code)
-            .push_bind(&team.timezone)
-            .push_bind(team.latitude)
-            .push_bind(team.longitude)
-            .push_bind(&team.elevation)
-            .push_bind(team.capacity)
-            .push_bind(team.construction_year)
-            .push_bind(team.grass)
-            .push_bind(team.dome)
-            .push_bind(&team.alternate_names);
-    });
+    let existing_set: HashSet<i32> = existing_cfbd_ids.into_iter().map(|(id,)| id).collect();
 
-    query_builder.push(
-        " ON CONFLICT (cfbd_id) DO UPDATE SET
-            school = EXCLUDED.school,
-            mascot = EXCLUDED.mascot,
-            abbreviation = EXCLUDED.abbreviation,
-            conference = EXCLUDED.conference,
-            division = EXCLUDED.division,
-            classification = EXCLUDED.classification,
-            color = EXCLUDED.color,
-            alternate_color = EXCLUDED.alternate_color,
-            twitter = EXCLUDED.twitter,
-            city = EXCLUDED.city,
-            state = EXCLUDED.state,
-            zip = EXCLUDED.zip,
-            country_code = EXCLUDED.country_code,
-            timezone = EXCLUDED.timezone,
-            latitude = EXCLUDED.latitude,
-            longitude = EXCLUDED.longitude,
-            elevation = EXCLUDED.elevation,
-            capacity = EXCLUDED.capacity,
-            construction_year = EXCLUDED.construction_year,
-            grass = EXCLUDED.grass,
-            dome = EXCLUDED.dome,
-            alternate_names = EXCLUDED.alternate_names
-        WHERE (
-            teams.school, teams.mascot, teams.abbreviation, teams.conference,
-            teams.division, teams.classification, teams.color, teams.alternate_color,
-            teams.twitter, teams.city, teams.state, teams.zip, teams.country_code,
-            teams.timezone, teams.latitude, teams.longitude, teams.elevation,
-            teams.capacity, teams.construction_year, teams.grass, teams.dome,
-            teams.alternate_names
-        ) IS DISTINCT FROM (
-            EXCLUDED.school, EXCLUDED.mascot, EXCLUDED.abbreviation, EXCLUDED.conference,
-            EXCLUDED.division, EXCLUDED.classification, EXCLUDED.color, EXCLUDED.alternate_color,
-            EXCLUDED.twitter, EXCLUDED.city, EXCLUDED.state, EXCLUDED.zip, EXCLUDED.country_code,
-            EXCLUDED.timezone, EXCLUDED.latitude, EXCLUDED.longitude, EXCLUDED.elevation,
-            EXCLUDED.capacity, EXCLUDED.construction_year, EXCLUDED.grass, EXCLUDED.dome,
-            EXCLUDED.alternate_names
+    let mut all_ids = Vec::new();
+    let mut total_inserted = 0;
+    let mut total_updated = 0;
+
+    for team in teams {
+        if existing_set.contains(&team.cfbd_id) {
+            total_updated += 1;
+        } else {
+            total_inserted += 1;
+        }
+
+        let id = sqlx::query_as::<_, (i32,)>(
+            "INSERT INTO teams (cfbd_id, school, mascot, abbreviation, conference, division, classification, color, alternate_color, twitter, city, state, zip, country_code, timezone, latitude, longitude, elevation, capacity, construction_year, grass, dome, alternate_names)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(cfbd_id) DO UPDATE SET
+                 school = excluded.school,
+                 mascot = excluded.mascot,
+                 abbreviation = excluded.abbreviation,
+                 conference = excluded.conference,
+                 division = excluded.division,
+                 classification = excluded.classification,
+                 color = excluded.color,
+                 alternate_color = excluded.alternate_color,
+                 twitter = excluded.twitter,
+                 city = excluded.city,
+                 state = excluded.state,
+                 zip = excluded.zip,
+                 country_code = excluded.country_code,
+                 timezone = excluded.timezone,
+                 latitude = excluded.latitude,
+                 longitude = excluded.longitude,
+                 elevation = excluded.elevation,
+                 capacity = excluded.capacity,
+                 construction_year = excluded.construction_year,
+                 grass = excluded.grass,
+                 dome = excluded.dome,
+                 alternate_names = excluded.alternate_names
+             WHERE teams.school IS NOT excluded.school
+                OR teams.mascot IS NOT excluded.mascot
+                OR teams.abbreviation IS NOT excluded.abbreviation
+                OR teams.conference IS NOT excluded.conference
+                OR teams.division IS NOT excluded.division
+                OR teams.classification IS NOT excluded.classification
+                OR teams.color IS NOT excluded.color
+                OR teams.alternate_color IS NOT excluded.alternate_color
+                OR teams.twitter IS NOT excluded.twitter
+                OR teams.city IS NOT excluded.city
+                OR teams.state IS NOT excluded.state
+                OR teams.zip IS NOT excluded.zip
+                OR teams.country_code IS NOT excluded.country_code
+                OR teams.timezone IS NOT excluded.timezone
+                OR teams.latitude IS NOT excluded.latitude
+                OR teams.longitude IS NOT excluded.longitude
+                OR teams.elevation IS NOT excluded.elevation
+                OR teams.capacity IS NOT excluded.capacity
+                OR teams.construction_year IS NOT excluded.construction_year
+                OR teams.grass IS NOT excluded.grass
+                OR teams.dome IS NOT excluded.dome
+                OR teams.alternate_names IS NOT excluded.alternate_names
+             RETURNING id"
         )
-        RETURNING id, (xmax = 0) AS created",
-    );
-
-    let results: Vec<(i32, bool)> = query_builder
-        .build_query_as::<(i32, bool)>()
-        .fetch_all(&mut *tx)
+        .bind(team.cfbd_id)
+        .bind(&team.school)
+        .bind(&team.mascot)
+        .bind(&team.abbreviation)
+        .bind(&team.conference)
+        .bind(&team.division)
+        .bind(&team.classification)
+        .bind(&team.color)
+        .bind(&team.alternate_color)
+        .bind(&team.twitter)
+        .bind(&team.city)
+        .bind(&team.state)
+        .bind(&team.zip)
+        .bind(&team.country_code)
+        .bind(&team.timezone)
+        .bind(team.latitude)
+        .bind(team.longitude)
+        .bind(&team.elevation)
+        .bind(team.capacity)
+        .bind(team.construction_year)
+        .bind(team.grass)
+        .bind(team.dome)
+        .bind(&team.alternate_names)
+        .fetch_optional(&mut *tx)
         .await?;
+
+        if let Some(id) = id {
+            all_ids.push(id.0);
+        } else if existing_set.contains(&team.cfbd_id) {
+            total_updated -= 1;
+        } else {
+            total_inserted -= 1;
+        }
+    }
 
     tx.commit().await?;
 
-    let ids: Vec<i32> = results.iter().map(|(id, _)| *id).collect();
-    let inserted = results.iter().filter(|(_, created)| *created).count();
-    let updated = results.len() - inserted;
-
     Ok(UpsertStats {
-        ids,
-        inserted,
-        updated,
+        ids: all_ids,
+        inserted: total_inserted,
+        updated: total_updated,
     })
 }
 
-pub async fn build_team_name_map(pool: &PgPool) -> Result<HashMap<String, i32>, sqlx::Error> {
-    let rows = sqlx::query!(
-        r#"
-        SELECT id, school
-        FROM teams
-        "#
-    )
-    .fetch_all(pool)
-    .await?;
+pub async fn build_team_name_map(pool: &SqlitePool) -> Result<HashMap<String, i32>, sqlx::Error> {
+    #[derive(sqlx::FromRow)]
+    struct TeamRow {
+        id: i32,
+        school: String,
+    }
+
+    let rows: Vec<TeamRow> = sqlx::query_as("SELECT id, school FROM teams")
+        .fetch_all(pool)
+        .await?;
 
     let map: HashMap<String, i32> = rows.into_iter().map(|row| (row.school, row.id)).collect();
 
@@ -155,5 +189,5 @@ pub struct Team {
     pub construction_year: Option<i32>,
     pub grass: Option<bool>,
     pub dome: Option<bool>,
-    pub alternate_names: Option<Vec<String>>,
+    pub alternate_names: Option<String>,
 }

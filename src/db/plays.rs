@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, SqlitePool};
 
 pub struct UpsertStats {
     pub ids: Vec<i32>,
@@ -7,7 +7,7 @@ pub struct UpsertStats {
     pub updated: usize,
 }
 
-pub async fn upsert_batch(pool: &PgPool, plays: &[Play]) -> Result<UpsertStats, sqlx::Error> {
+pub async fn upsert_batch(pool: &SqlitePool, plays: &[Play]) -> Result<UpsertStats, sqlx::Error> {
     if plays.is_empty() {
         return Ok(UpsertStats {
             ids: vec![],
@@ -16,133 +16,152 @@ pub async fn upsert_batch(pool: &PgPool, plays: &[Play]) -> Result<UpsertStats, 
         });
     }
 
-    const CHUNK_SIZE: usize = 1000;
+    let mut tx = pool.begin().await?;
+
+    let existing_ids: Vec<(String,)> = {
+        let cfbd_ids: Vec<&str> = plays.iter().map(|p| p.cfbd_id.as_str()).collect();
+        if cfbd_ids.is_empty() {
+            return Ok(UpsertStats {
+                ids: vec![],
+                inserted: 0,
+                updated: 0,
+            });
+        }
+        let placeholders: Vec<&str> = cfbd_ids.iter().map(|_| "?").collect();
+        let query = format!(
+            "SELECT cfbd_id FROM plays WHERE cfbd_id IN ({})",
+            placeholders.join(", ")
+        );
+        let mut query = sqlx::query_as::<_, (String,)>(&query);
+        for id in cfbd_ids {
+            query = query.bind(id);
+        }
+        query.fetch_all(&mut *tx).await?
+    };
+
+    let existing_set: std::collections::HashSet<String> = existing_ids.into_iter().map(|(id,)| id).collect();
+
     let mut all_ids = Vec::new();
     let mut total_inserted = 0;
     let mut total_updated = 0;
 
-    for chunk in plays.chunks(CHUNK_SIZE) {
-        let mut tx = pool.begin().await?;
+    for play in plays {
+        if existing_set.contains(&play.cfbd_id) {
+            total_updated += 1;
+        } else {
+            total_inserted += 1;
+        }
 
-        let mut query_builder = sqlx::QueryBuilder::new(
-            "INSERT INTO plays (
-                cfbd_id, cfbd_drive_id, drive_id, game_id,
-                drive_number, play_number,
-                offense, offense_team_id, offense_conference, offense_score,
-                defense, defense_team_id, defense_conference, defense_score,
-                home, away, period,
-                clock_minutes, clock_seconds,
-                offense_timeouts, defense_timeouts,
-                yardline, yards_to_goal, down, distance, yards_gained,
-                scoring, play_type, play_text, ppa, wallclock
-            ) ",
-        );
+        let id = sqlx::query_as::<_, (i32,)>(
+            "INSERT INTO plays (cfbd_id, cfbd_drive_id, drive_id, game_id, drive_number, play_number, offense, offense_team_id, offense_conference, offense_score, defense, defense_team_id, defense_conference, defense_score, home, away, period, clock_minutes, clock_seconds, offense_timeouts, defense_timeouts, yardline, yards_to_goal, down, distance, yards_gained, scoring, play_type, play_text, ppa, wallclock)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(cfbd_id) DO UPDATE SET
+                 cfbd_drive_id = excluded.cfbd_drive_id,
+                 drive_id = excluded.drive_id,
+                 game_id = excluded.game_id,
+                 drive_number = excluded.drive_number,
+                 play_number = excluded.play_number,
+                 offense = excluded.offense,
+                 offense_team_id = excluded.offense_team_id,
+                 offense_conference = excluded.offense_conference,
+                 offense_score = excluded.offense_score,
+                 defense = excluded.defense,
+                 defense_team_id = excluded.defense_team_id,
+                 defense_conference = excluded.defense_conference,
+                 defense_score = excluded.defense_score,
+                 home = excluded.home,
+                 away = excluded.away,
+                 period = excluded.period,
+                 clock_minutes = excluded.clock_minutes,
+                 clock_seconds = excluded.clock_seconds,
+                 offense_timeouts = excluded.offense_timeouts,
+                 defense_timeouts = excluded.defense_timeouts,
+                 yardline = excluded.yardline,
+                 yards_to_goal = excluded.yards_to_goal,
+                 down = excluded.down,
+                 distance = excluded.distance,
+                 yards_gained = excluded.yards_gained,
+                 scoring = excluded.scoring,
+                 play_type = excluded.play_type,
+                 play_text = excluded.play_text,
+                 ppa = excluded.ppa,
+                 wallclock = excluded.wallclock
+             WHERE plays.cfbd_drive_id IS NOT excluded.cfbd_drive_id
+                OR plays.drive_id IS NOT excluded.drive_id
+                OR plays.game_id IS NOT excluded.game_id
+                OR plays.drive_number IS NOT excluded.drive_number
+                OR plays.play_number IS NOT excluded.play_number
+                OR plays.offense IS NOT excluded.offense
+                OR plays.offense_team_id IS NOT excluded.offense_team_id
+                OR plays.offense_conference IS NOT excluded.offense_conference
+                OR plays.offense_score IS NOT excluded.offense_score
+                OR plays.defense IS NOT excluded.defense
+                OR plays.defense_team_id IS NOT excluded.defense_team_id
+                OR plays.defense_conference IS NOT excluded.defense_conference
+                OR plays.defense_score IS NOT excluded.defense_score
+                OR plays.home IS NOT excluded.home
+                OR plays.away IS NOT excluded.away
+                OR plays.period IS NOT excluded.period
+                OR plays.clock_minutes IS NOT excluded.clock_minutes
+                OR plays.clock_seconds IS NOT excluded.clock_seconds
+                OR plays.offense_timeouts IS NOT excluded.offense_timeouts
+                OR plays.defense_timeouts IS NOT excluded.defense_timeouts
+                OR plays.yardline IS NOT excluded.yardline
+                OR plays.yards_to_goal IS NOT excluded.yards_to_goal
+                OR plays.down IS NOT excluded.down
+                OR plays.distance IS NOT excluded.distance
+                OR plays.yards_gained IS NOT excluded.yards_gained
+                OR plays.scoring IS NOT excluded.scoring
+                OR plays.play_type IS NOT excluded.play_type
+                OR plays.play_text IS NOT excluded.play_text
+                OR plays.ppa IS NOT excluded.ppa
+                OR plays.wallclock IS NOT excluded.wallclock
+             RETURNING id"
+        )
+        .bind(&play.cfbd_id)
+        .bind(&play.cfbd_drive_id)
+        .bind(play.drive_id)
+        .bind(play.game_id)
+        .bind(play.drive_number)
+        .bind(play.play_number)
+        .bind(&play.offense)
+        .bind(play.offense_team_id)
+        .bind(&play.offense_conference)
+        .bind(play.offense_score)
+        .bind(&play.defense)
+        .bind(play.defense_team_id)
+        .bind(&play.defense_conference)
+        .bind(play.defense_score)
+        .bind(&play.home)
+        .bind(&play.away)
+        .bind(play.period)
+        .bind(play.clock_minutes)
+        .bind(play.clock_seconds)
+        .bind(play.offense_timeouts)
+        .bind(play.defense_timeouts)
+        .bind(play.yardline)
+        .bind(play.yards_to_goal)
+        .bind(play.down)
+        .bind(play.distance)
+        .bind(play.yards_gained)
+        .bind(play.scoring)
+        .bind(&play.play_type)
+        .bind(&play.play_text)
+        .bind(play.ppa)
+        .bind(&play.wallclock)
+        .fetch_optional(&mut *tx)
+        .await?;
 
-        query_builder.push_values(chunk, |mut b, play| {
-            b.push_bind(&play.cfbd_id)
-                .push_bind(&play.cfbd_drive_id)
-                .push_bind(play.drive_id)
-                .push_bind(play.game_id)
-                .push_bind(play.drive_number)
-                .push_bind(play.play_number)
-                .push_bind(&play.offense)
-                .push_bind(play.offense_team_id)
-                .push_bind(&play.offense_conference)
-                .push_bind(play.offense_score)
-                .push_bind(&play.defense)
-                .push_bind(play.defense_team_id)
-                .push_bind(&play.defense_conference)
-                .push_bind(play.defense_score)
-                .push_bind(&play.home)
-                .push_bind(&play.away)
-                .push_bind(play.period)
-                .push_bind(play.clock_minutes)
-                .push_bind(play.clock_seconds)
-                .push_bind(play.offense_timeouts)
-                .push_bind(play.defense_timeouts)
-                .push_bind(play.yardline)
-                .push_bind(play.yards_to_goal)
-                .push_bind(play.down)
-                .push_bind(play.distance)
-                .push_bind(play.yards_gained)
-                .push_bind(play.scoring)
-                .push_bind(&play.play_type)
-                .push_bind(&play.play_text)
-                .push_bind(play.ppa)
-                .push_bind(&play.wallclock);
-        });
-
-        query_builder.push(
-            " ON CONFLICT (cfbd_id) DO UPDATE SET
-                cfbd_drive_id = EXCLUDED.cfbd_drive_id,
-                drive_id = EXCLUDED.drive_id,
-                game_id = EXCLUDED.game_id,
-                drive_number = EXCLUDED.drive_number,
-                play_number = EXCLUDED.play_number,
-                offense = EXCLUDED.offense,
-                offense_team_id = EXCLUDED.offense_team_id,
-                offense_conference = EXCLUDED.offense_conference,
-                offense_score = EXCLUDED.offense_score,
-                defense = EXCLUDED.defense,
-                defense_team_id = EXCLUDED.defense_team_id,
-                defense_conference = EXCLUDED.defense_conference,
-                defense_score = EXCLUDED.defense_score,
-                home = EXCLUDED.home,
-                away = EXCLUDED.away,
-                period = EXCLUDED.period,
-                clock_minutes = EXCLUDED.clock_minutes,
-                clock_seconds = EXCLUDED.clock_seconds,
-                offense_timeouts = EXCLUDED.offense_timeouts,
-                defense_timeouts = EXCLUDED.defense_timeouts,
-                yardline = EXCLUDED.yardline,
-                yards_to_goal = EXCLUDED.yards_to_goal,
-                down = EXCLUDED.down,
-                distance = EXCLUDED.distance,
-                yards_gained = EXCLUDED.yards_gained,
-                scoring = EXCLUDED.scoring,
-                play_type = EXCLUDED.play_type,
-                play_text = EXCLUDED.play_text,
-                ppa = EXCLUDED.ppa,
-                wallclock = EXCLUDED.wallclock
-            WHERE (
-                plays.cfbd_drive_id, plays.drive_id, plays.game_id,
-                plays.drive_number, plays.play_number,
-                plays.offense, plays.offense_team_id, plays.offense_conference, plays.offense_score,
-                plays.defense, plays.defense_team_id, plays.defense_conference, plays.defense_score,
-                plays.home, plays.away, plays.period,
-                plays.clock_minutes, plays.clock_seconds,
-                plays.offense_timeouts, plays.defense_timeouts,
-                plays.yardline, plays.yards_to_goal, plays.down, plays.distance, plays.yards_gained,
-                plays.scoring, plays.play_type, plays.play_text, plays.ppa, plays.wallclock
-            ) IS DISTINCT FROM (
-                EXCLUDED.cfbd_drive_id, EXCLUDED.drive_id, EXCLUDED.game_id,
-                EXCLUDED.drive_number, EXCLUDED.play_number,
-                EXCLUDED.offense, EXCLUDED.offense_team_id, EXCLUDED.offense_conference, EXCLUDED.offense_score,
-                EXCLUDED.defense, EXCLUDED.defense_team_id, EXCLUDED.defense_conference, EXCLUDED.defense_score,
-                EXCLUDED.home, EXCLUDED.away, EXCLUDED.period,
-                EXCLUDED.clock_minutes, EXCLUDED.clock_seconds,
-                EXCLUDED.offense_timeouts, EXCLUDED.defense_timeouts,
-                EXCLUDED.yardline, EXCLUDED.yards_to_goal, EXCLUDED.down, EXCLUDED.distance, EXCLUDED.yards_gained,
-                EXCLUDED.scoring, EXCLUDED.play_type, EXCLUDED.play_text, EXCLUDED.ppa, EXCLUDED.wallclock
-            )
-            RETURNING id, (xmax = 0) AS created",
-        );
-
-        let results: Vec<(i32, bool)> = query_builder
-            .build_query_as::<(i32, bool)>()
-            .fetch_all(&mut *tx)
-            .await?;
-
-        tx.commit().await?;
-
-        let ids: Vec<i32> = results.iter().map(|(id, _)| *id).collect();
-        let inserted = results.iter().filter(|(_, created)| *created).count();
-        let updated = results.len() - inserted;
-
-        all_ids.extend(ids);
-        total_inserted += inserted;
-        total_updated += updated;
+        if let Some(id) = id {
+            all_ids.push(id.0);
+        } else if existing_set.contains(&play.cfbd_id) {
+            total_updated -= 1;
+        } else {
+            total_inserted -= 1;
+        }
     }
+
+    tx.commit().await?;
 
     Ok(UpsertStats {
         ids: all_ids,

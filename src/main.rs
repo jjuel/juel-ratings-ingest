@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use dotenv::dotenv;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use anyhow::{Context, Ok, Result};
 
@@ -162,7 +162,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn ingest_teams(pool: &PgPool, year: i32) -> Result<usize> {
+async fn ingest_teams(pool: &SqlitePool, year: i32) -> Result<usize> {
     let api_teams = api::teams::fetch(year)
         .await
         .context(format!("Failed to fetch teams from CFBD API for year {}", year))?;
@@ -177,7 +177,7 @@ async fn ingest_teams(pool: &PgPool, year: i32) -> Result<usize> {
     Ok(stats.ids.len())
 }
 
-async fn ingest_games(pool: &PgPool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
+async fn ingest_games(pool: &SqlitePool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
     let scope = match week {
         Some(w) => format!("week {} of year {}", w, year),
         None => format!("year {}", year),
@@ -198,7 +198,7 @@ async fn ingest_games(pool: &PgPool, year: i32, week: Option<i32>, season_type: 
     Ok(stats.ids.len())
 }
 
-async fn ingest_drives(pool: &PgPool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
+async fn ingest_drives(pool: &SqlitePool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
     let scope = match week {
         Some(w) => format!("week {} of year {}", w, year),
         None => format!("year {}", year),
@@ -238,7 +238,7 @@ async fn ingest_drives(pool: &PgPool, year: i32, week: Option<i32>, season_type:
     Ok(stats.ids.len())
 }
 
-async fn ingest_plays(pool: &PgPool, year: i32, week: i32, season_type: Option<String>) -> Result<usize> {
+async fn ingest_plays(pool: &SqlitePool, year: i32, week: i32, season_type: Option<String>) -> Result<usize> {
     let scope = format!("week {} of year {}", week, year);
 
     let api_plays = api::plays::fetch(year, week, season_type)
@@ -279,7 +279,7 @@ async fn ingest_plays(pool: &PgPool, year: i32, week: i32, season_type: Option<S
     Ok(stats.ids.len())
 }
 
-async fn ingest_game_advanced_stats(pool: &PgPool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
+async fn ingest_game_advanced_stats(pool: &SqlitePool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
     let scope = match week {
         Some(w) => format!("week {} of year {}", w, year),
         None => format!("year {}", year),
@@ -319,7 +319,7 @@ async fn ingest_game_advanced_stats(pool: &PgPool, year: i32, week: Option<i32>,
     Ok(stats.ids.len())
 }
 
-async fn ingest_havoc(pool: &PgPool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
+async fn ingest_havoc(pool: &SqlitePool, year: i32, week: Option<i32>, season_type: Option<String>) -> Result<usize> {
     let scope = match week {
         Some(w) => format!("week {} of year {}", w, year),
         None => format!("year {}", year),
