@@ -1,9 +1,8 @@
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::env;
+use std::path::Path;
 use std::str::FromStr;
-
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 pub async fn create_pool() -> Result<SqlitePool, sqlx::Error> {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set.");
@@ -19,13 +18,18 @@ pub async fn create_pool() -> Result<SqlitePool, sqlx::Error> {
         .connect_with(options)
         .await?;
 
-    bootstrap_legacy_schema(&pool).await?;
-    MIGRATOR.run(&pool).await?;
+    let migrator = sqlx::migrate::Migrator::new(Path::new("./migrations")).await?;
+
+    bootstrap_legacy_schema(&pool, &migrator).await?;
+    migrator.run(&pool).await?;
 
     Ok(pool)
 }
 
-async fn bootstrap_legacy_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+async fn bootstrap_legacy_schema(
+    pool: &SqlitePool,
+    migrator: &sqlx::migrate::Migrator,
+) -> Result<(), sqlx::Error> {
     let applied_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
         .fetch_one(pool)
         .await?;
@@ -46,7 +50,7 @@ async fn bootstrap_legacy_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         return Ok(());
     }
 
-    if let Some(migration) = MIGRATOR.iter().next() {
+    if let Some(migration) = migrator.iter().next() {
         sqlx::query(
             "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
              VALUES (?, ?, 1, ?, 0)",
